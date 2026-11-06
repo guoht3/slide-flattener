@@ -5,6 +5,7 @@ import csv
 import html
 import shutil
 from pathlib import Path
+from urllib.parse import quote
 
 import cv2
 import numpy as np
@@ -39,6 +40,7 @@ def gallery(rows, out):
         original = html.escape(row["original"], quote=True)
         processed = html.escape(row["processed"], quote=True)
         badge = "需人工处理" if status == "manual_review" else "自动处理，待你确认"
+        editor = "http://127.0.0.1:8765/?image=" + quote(row["filename"], safe="")
         cards.append(
             f'<article class="card" data-status="{status}">'
             f'<header><strong>{name}</strong><span class="badge">{badge}</span></header>'
@@ -47,7 +49,8 @@ def gallery(rows, out):
             f'<img loading="lazy" src="{original}" alt="原图 {name}"><small>原图 ↗</small></a>'
             f'<a href="{processed}" target="_blank">'
             f'<img loading="lazy" src="{processed}" alt="自动处理 {name}">'
-            f'<small>自动处理 ↗</small></a></div></article>'
+            f'<small>自动处理 ↗</small></a></div>'
+            f'<a class="edit-link" href="{editor}" target="_blank">手动调整四角 ↗</a></article>'
         )
     accepted = sum(row["status"] == "auto_checked" for row in rows)
     manual = len(rows) - accepted
@@ -69,10 +72,11 @@ button.active{{background:#145a9e;color:white;border-color:#145a9e}}
 .pair{{display:grid;grid-template-columns:1fr 1fr;gap:8px}}
 .pair a{{color:#145a9e;text-decoration:none}}.pair img{{display:block;width:100%;height:180px;object-fit:contain;background:#e9eef2}}
 .pair small{{display:block;padding-top:4px}}
+.edit-link{{display:inline-block;margin-top:12px;color:#145a9e;text-decoration:none;font-weight:600}}
 @media(max-width:560px){{body{{padding:12px}}.grid{{grid-template-columns:1fr}}.pair img{{height:130px}}}}
 </style></head><body><h1>讲座图片处理结果</h1>
 <p class="intro">共 {len(rows)} 张：我初步检查后，将 {accepted} 张放入“自动处理，待你确认”，{manual} 张放入“需人工处理”。
-点击图片可查看原尺寸。原图中的遮挡或拍摄时已缺失的部分无法通过裁切恢复。</p>
+点击图片可查看原尺寸，点击“手动调整四角”可在本机编辑并保存多个版本。原图中的遮挡或拍摄时已缺失的部分无法通过裁切恢复。</p>
 <div class="controls"><button class="active" data-filter="all">全部 {len(rows)}</button>
 <button data-filter="auto_checked">自动处理 {accepted}</button>
 <button data-filter="manual_review">需人工处理 {manual}</button></div>
@@ -93,6 +97,8 @@ def main():
     parser.add_argument("--source-dir", type=Path, required=True)
     parser.add_argument("--processed-dir", type=Path, required=True)
     parser.add_argument("--manual-list", type=Path, required=True)
+    parser.add_argument("--additional-review", type=Path,
+                        help="CSV of extra images to retain in manual review")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
 
@@ -103,6 +109,14 @@ def main():
     manual = {row["filename"]: row["reason"].strip() for row in manual_rows}
     if len(manual) != len(manual_rows):
         parser.error("duplicate filename in manual review list")
+    if args.additional_review:
+        with args.additional_review.open(newline="", encoding="utf-8-sig") as file:
+            additional = list(csv.DictReader(file))
+        if len({row["filename"] for row in additional}) != len(additional):
+            parser.error("duplicate filename in additional review list")
+        for row in additional:
+            name, reason = row["filename"], row["reason"].strip()
+            manual[name] = f"{manual[name]}；{reason}" if name in manual else reason
     sources = sorted(args.source_dir.glob("*.jpg"))
     if not sources:
         parser.error("no JPG originals found")

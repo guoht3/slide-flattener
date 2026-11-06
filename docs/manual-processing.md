@@ -1,11 +1,15 @@
 # 查看与手动处理
 
-打开本地 `deliverables_20261106/index.html`，可按“自动处理”与“需人工处理”筛选；点击图片可打开原尺寸。`manifest.csv` 记录每张图片的分类与路径。
+新版对照页是 `deliverables_20261106_v2/index.html`。89 张图片均可按原图与自动结果对照；35 张已列为需人工处理，其中包含原先的 23 张和用户补充指出的 12 张。旧版 `deliverables_20261106/` 与人工清单仍保留。
 
-需要手动移动四角时，在项目目录的 PowerShell 中运行：
+打开浏览器编辑器：<http://127.0.0.1:8765/>。如果页面无法打开，在本项目目录的 PowerShell 中运行：
 
 ```powershell
-& '.\.venv\Scripts\python.exe' annotate.py --source-dir deliverables_20261106\manual_review\originals --out deliverables_20261106\manual_review\corrected --no-autocolor
+& '.\.venv\Scripts\python.exe' manual_editor.py --package deliverables_20261106_v2 --port 8765
 ```
 
-在 `edit` 窗口拖动红点，`preview` 窗口实时显示结果。`NEXT`、`PREV`、`DONE` 或 Esc 会保存当前图。尚未补回原照片缺失的内容；这类图片只能保留现有局部画面，或查找其他照片。
+在左侧选择图片。拖动原图上的四个红点；自动角点偏差过大时，按“重选四角”，依次点击左上、右上、右下、左下。核对右上角和右下角边界，检查预览中的标题、图表、脚注是否完整，再点“保存为新版本”。可切换画面比例；一般先用 16:9，原图比例明显不符时再试其他选项。仍有问题的自动组图片可点“加入人工清单”。
+
+手动结果保存在项目根目录 `manual_corrections/`，按原文件名分文件夹。每次保存都会产生新的 JPG 和记录角点的 JSON；不会覆盖原图、自动结果或旧版本。编辑器“已保存”视图显示这些图片；版本列表可打开旧版并在其角点基础上继续调整。加入人工清单的操作记录在 `manual_corrections/flags.jsonl`。
+
+如果原照片拍摄时画面已经缺失，矫正无法恢复缺失内容；这类照片应继续留在人工组，必要时寻找另一张照片。

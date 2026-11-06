@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>讲座图片手动校正</title>
+  <style>
+    :root { font-family: system-ui, "Microsoft YaHei", sans-serif; color: #182330; background: #f2f5f8; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    button, select, input { font: inherit; }
+    button { cursor: pointer; border: 1px solid #b8c8d8; border-radius: 8px; background: white; padding: 9px 12px; }
+    button:hover { background: #eef5fb; }
+    button:disabled { opacity: .48; cursor: default; }
+    button.primary { color: white; background: #1764a8; border-color: #1764a8; font-weight: 650; }
+    button.primary:hover { background: #0e528f; }
+    .app { display: grid; grid-template-columns: 290px minmax(0,1fr); height: 100vh; }
+    aside { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid #d6e0e9; background: #fff; }
+    aside h1 { font-size: 18px; margin: 16px 14px 4px; }
+    aside p { font-size: 12px; color: #5b6a78; margin: 0 14px 12px; line-height: 1.5; }
+    .side-controls { padding: 0 12px 12px; border-bottom: 1px solid #e2e8ef; }
+    .side-controls input { width: 100%; padding: 9px; border: 1px solid #b8c8d8; border-radius: 8px; }
+    .filters { display: flex; gap: 5px; margin-top: 8px; }
+    .filters button { flex: 1; padding: 7px 3px; font-size: 12px; }
+    .filters button.active { background: #1764a8; border-color: #1764a8; color: white; }
+    #list { overflow: auto; padding: 8px; }
+    .entry { width: 100%; text-align: left; display: flex; gap: 8px; align-items: center; margin-bottom: 7px; padding: 6px; }
+    .entry.selected { border-color: #1764a8; box-shadow: 0 0 0 2px #1764a833; }
+    .entry img { width: 70px; height: 52px; object-fit: contain; background: #e9eef2; flex: none; }
+    .entry span { min-width: 0; }
+    .entry strong { display: block; font-size: 12px; overflow-wrap: anywhere; }
+    .entry small { display: block; color: #647282; font-size: 11px; margin-top: 3px; }
+    main { min-width: 0; overflow: auto; padding: 18px; }
+    .top { display: flex; justify-content: space-between; align-items: start; flex-wrap: wrap; gap: 12px; }
+    .top h2 { margin: 0; font-size: 20px; }
+    #reason { color: #95532b; margin: 6px 0 0; min-height: 20px; }
+    .nav { display: flex; gap: 7px; }
+    .help { background: #e7f2fb; border: 1px solid #c4dff3; border-radius: 9px; padding: 10px 13px; margin: 12px 0; line-height: 1.5; }
+    .work { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(290px,1fr); gap: 14px; }
+    .panel { min-width: 0; background: white; border: 1px solid #d8e2eb; border-radius: 10px; padding: 12px; }
+    .panel h3 { margin: 0 0 9px; font-size: 15px; }
+    #canvas-wrap { width: 100%; min-height: 360px; display: grid; place-items: center; background: #24303b; border-radius: 6px; overflow: hidden; }
+    #edit-canvas { display: block; max-width: 100%; touch-action: none; cursor: crosshair; }
+    #preview { display: block; width: 100%; min-height: 260px; max-height: 62vh; object-fit: contain; background: #e4e9ef; }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+    .toolbar label { display: flex; gap: 6px; align-items: center; }
+    select { padding: 8px; border: 1px solid #b8c8d8; border-radius: 8px; background: white; }
+    #message { min-height: 24px; margin-top: 10px; font-size: 14px; color: #365e32; }
+    #message.error { color: #b03530; }
+    .versions { background: white; border: 1px solid #d8e2eb; border-radius: 10px; padding: 12px; margin-top: 14px; }
+    .versions h3 { margin: 0 0 8px; font-size: 15px; }
+    .version { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border-top: 1px solid #e8edf2; padding: 7px 0; font-size: 13px; }
+    .version a { color: #1764a8; }
+    .version button { padding: 4px 9px; font-size: 12px; }
+    @media (max-width: 980px) { .work { grid-template-columns: 1fr; } }
+    @media (max-width: 680px) { .app { grid-template-columns: 1fr; height: auto; } aside { max-height: 280px; } main { padding: 12px; } }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <h1>讲座图片手动校正</h1>
+    <p>人工组始终保留。保存新版本不会覆盖原图、自动结果或旧版本。</p>
+    <div class="side-controls">
+      <input id="search" type="search" placeholder="按图片文件名查找">
+      <div class="filters">
+        <button id="filter-manual" class="active">需人工</button>
+        <button id="filter-all">全部</button>
+        <button id="filter-saved">已保存</button>
+      </div>
+    </div>
+    <div id="list"></div>
+  </aside>
+  <main>
+    <div class="top">
+      <div><h2 id="title">正在加载图片清单…</h2><p id="reason"></p></div>
+      <div class="nav"><button id="previous">上一张</button><button id="next">下一张</button></div>
+    </div>
+    <div class="help">拖动原图上的红色角点。若自动角点偏得太远，点“重选四角”，依次点击<strong>左上 → 右上 → 右下 → 左下</strong>。调整后检查预览，再保存版本。</div>
+    <div class="work">
+      <section class="panel"><h3>原图与四角</h3><div id="canvas-wrap"><canvas id="edit-canvas"></canvas></div></section>
+      <section class="panel"><h3>校正预览</h3><img id="preview" alt="校正预览"></section>
+    </div>
+    <div class="toolbar">
+      <button id="reset">恢复自动角点</button>
+      <button id="reselect">重选四角</button>
+      <label>画面比例 <select id="aspect"><option>16:9</option><option>4:3</option><option>3:2</option><option>auto</option></select></label>
+      <button id="refresh-preview">更新预览</button>
+      <button id="flag">加入人工清单</button>
+      <button id="save" class="primary">保存为新版本</button>
+    </div>
+    <div id="message" role="status"></div>
+    <section class="versions"><h3>已保存的手动版本</h3><div id="version-list">尚未保存</div></section>
+  </main>
+</div>
+<script>
+const state = {items: [], current: null, image: null, points: [], scale: 1, drag: -1,
+  pick: -1, filter: 'manual', dirty: false, previewUrl: null};
+const $ = id => document.getElementById(id);
+const canvas = $('edit-canvas');
+const ctx = canvas.getContext('2d');
+const byName = name => state.items.find(item => item.filename === name);
+const urlName = name => encodeURIComponent(name);
+
+async function requestJSON(url, options) {
+  const response = await fetch(url, options);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || '请求失败');
+  return data;
+}
+async function postJSON(url, body) {
+  return requestJSON(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+}
+function message(text, error = false) {
+  $('message').textContent = text;
+  $('message').classList.toggle('error', error);
+}
+function filteredItems() {
+  const query = $('search').value.trim().toLowerCase();
+  return state.items.filter(item => item.filename.toLowerCase().includes(query) &&
+    (state.filter === 'all' || (state.filter === 'manual' && item.status === 'manual_review') ||
+     (state.filter === 'saved' && item.version_count > 0)));
+}
+function setFilter(filter) {
+  state.filter = filter;
+  for (const id of ['manual', 'all', 'saved']) $('filter-' + id).classList.toggle('active', id === filter);
+  renderList();
+}
+function renderList() {
+  const list = $('list');
+  list.replaceChildren();
+  const visible = filteredItems();
+  for (const item of visible) {
+    const button = document.createElement('button');
+    button.className = 'entry' + (state.current?.filename === item.filename ? ' selected' : '');
+    const thumb = document.createElement('img');
+    thumb.loading = 'lazy';
+    thumb.src = '/api/thumb/' + urlName(item.filename);
+    thumb.alt = '';
+    const label = document.createElement('span');
+    const strong = document.createElement('strong');
+    strong.textContent = item.filename;
+    const small = document.createElement('small');
+    small.textContent = (item.status === 'manual_review' ? '需人工' : '待确认') +
+      (item.version_count ? ` · 已保存 ${item.version_count} 版` : '');
+    label.append(strong, small);
+    button.append(thumb, label);
+    button.onclick = () => select(item.filename);
+    list.append(button);
+  }
+  if (!visible.length) list.textContent = '没有符合条件的图片';
+  const manualCount = state.items.filter(item => item.status === 'manual_review').length;
+  const savedCount = state.items.filter(item => item.version_count > 0).length;
+  $('filter-manual').textContent = `需人工 ${manualCount}`;
+  $('filter-all').textContent = `全部 ${state.items.length}`;
+  $('filter-saved').textContent = `已保存 ${savedCount}`;
+}
+function draw() {
+  if (!state.image) return;
+  const available = Math.max(300, $('canvas-wrap').clientWidth - 20);
+  const maximumHeight = Math.max(300, window.innerHeight * .62);
+  state.scale = Math.min(available / state.image.naturalWidth, maximumHeight / state.image.naturalHeight);
+  canvas.width = Math.round(state.image.naturalWidth * state.scale);
+  canvas.height = Math.round(state.image.naturalHeight * state.scale);
+  ctx.drawImage(state.image, 0, 0, canvas.width, canvas.height);
+  if (state.points.length !== 4) return;
+  ctx.beginPath();
+  state.points.forEach(([x, y], i) => i ? ctx.lineTo(x * state.scale, y * state.scale) : ctx.moveTo(x * state.scale, y * state.scale));
+  ctx.closePath();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = '#14e678';
+  ctx.stroke();
+  state.points.forEach(([x, y], i) => {
+    const px = x * state.scale, py = y * state.scale;
+    ctx.beginPath(); ctx.arc(px, py, 9, 0, Math.PI * 2);
+    ctx.fillStyle = '#f13b3b'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = 'white'; ctx.stroke();
+    ctx.font = 'bold 13px sans-serif'; ctx.fillStyle = 'white';
+    ctx.fillText(String(i + 1), px - 4, py + 4);
+  });
+}
+function renderVersions() {
+  const list = $('version-list');
+  list.replaceChildren();
+  const versions = state.current?.versions || [];
+  if (!versions.length) { list.textContent = '尚未保存'; return; }
+  for (const version of versions) {
+    const row = document.createElement('div'); row.className = 'version';
+    const link = document.createElement('a');
+    link.href = version.url; link.target = '_blank';
+    link.textContent = `${new Date(version.created_at).toLocaleString()} · ${version.aspect} · 查看图片 ↗`;
+    const restore = document.createElement('button'); restore.textContent = '以此版本继续调整';
+    restore.onclick = () => {
+      state.points = version.corners.map(point => [...point]);
+      $('aspect').value = version.aspect; state.dirty = true; draw(); updatePreview();
+    };
+    row.append(link, restore); list.append(row);
+  }
+}
+async function select(name) {
+  if (state.current?.filename === name) return;
+  if (state.dirty && !confirm('当前角点尚未保存。仍要切换图片吗？')) return;
+  message('加载中…');
+  try {
+    const item = await requestJSON('/api/item/' + urlName(name));
+    const image = new Image(); image.src = item.original_url;
+    await image.decode();
+    state.current = item; state.image = image;
+    state.points = item.corners.map(point => [...point]);
+    state.drag = -1; state.pick = -1; state.dirty = false;
+    $('title').textContent = item.filename;
+    $('reason').textContent = item.reason || '自动处理，待你确认';
+    $('aspect').value = item.aspect;
+    $('flag').disabled = item.status === 'manual_review';
+    $('preview').src = item.latest_url || item.attempt_url;
+    draw(); renderVersions(); renderList(); message('拖动角点或重选四角，然后检查预览。');
+    history.replaceState(null, '', '/?image=' + urlName(name));
+  } catch (error) { message(error.message, true); }
+}
+function position(event) {
+  const rect = canvas.getBoundingClientRect();
+  const px = (event.clientX - rect.left) * canvas.width / rect.width;
+  const py = (event.clientY - rect.top) * canvas.height / rect.height;
+  return [Math.max(0, Math.min(state.image.naturalWidth - 1, px / state.scale)),
+          Math.max(0, Math.min(state.image.naturalHeight - 1, py / state.scale))];
+}
+canvas.addEventListener('pointerdown', event => {
+  if (!state.current) return;
+  const point = position(event);
+  if (state.pick >= 0) {
+    state.points[state.pick] = point; state.pick++;
+    state.dirty = true; draw();
+    if (state.pick === 4) { state.pick = -1; message('四角已选，正在更新预览…'); updatePreview(); }
+    else message(`请点击第 ${state.pick + 1} 个角点。`);
+    return;
+  }
+  let best = -1, distance = 24;
+  state.points.forEach((p, i) => {
+    const d = Math.hypot((p[0] - point[0]) * state.scale, (p[1] - point[1]) * state.scale);
+    if (d < distance) { best = i; distance = d; }
+  });
+  if (best >= 0) { state.drag = best; canvas.setPointerCapture(event.pointerId); }
+});
+canvas.addEventListener('pointermove', event => {
+  if (state.drag < 0) return;
+  state.points[state.drag] = position(event);
+  state.dirty = true; draw();
+});
+canvas.addEventListener('pointerup', () => {
+  if (state.drag < 0) return;
+  state.drag = -1; updatePreview();
+});
+canvas.addEventListener('pointercancel', () => { state.drag = -1; });
+async function updatePreview() {
+  if (!state.current || state.pick >= 0) return;
+  const payload = {filename: state.current.filename, corners: state.points, aspect: $('aspect').value};
+  message('正在生成预览…');
+  try {
+    const response = await fetch('/api/preview', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)});
+    if (!response.ok) throw new Error((await response.json()).error || '预览失败');
+    const url = URL.createObjectURL(await response.blob());
+    $('preview').src = url;
+    if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
+    state.previewUrl = url;
+    message('预览已更新。确认四边和文字完整后可保存新版本。');
+  } catch (error) { message(error.message, true); }
+}
+async function save() {
+  if (!state.current || state.pick >= 0) return;
+  const button = $('save'); button.disabled = true; message('正在保存原尺寸图片…');
+  try {
+    const payload = {filename: state.current.filename, corners: state.points, aspect: $('aspect').value};
+    const saved = await postJSON('/api/save', payload);
+    state.current = await requestJSON('/api/item/' + urlName(state.current.filename));
+    state.items = await requestJSON('/api/items');
+    state.dirty = false;
+    $('flag').disabled = true;
+    $('reason').textContent = state.current.reason || '已保存手动版本';
+    $('preview').src = saved.url;
+    renderVersions(); renderList(); message(`已保存第 ${saved.version_count} 个版本；原图和旧版本均保留。`);
+  } catch (error) { message(error.message, true); }
+  finally { button.disabled = false; }
+}
+async function flag() {
+  if (!state.current || state.current.status === 'manual_review') return;
+  try {
+    await postJSON('/api/flag', {filename: state.current.filename});
+    state.current = await requestJSON('/api/item/' + urlName(state.current.filename));
+    state.items = await requestJSON('/api/items');
+    $('flag').disabled = true; $('reason').textContent = state.current.reason;
+    renderList(); message('已加入人工清单；原图和自动结果继续保留。');
+  } catch (error) { message(error.message, true); }
+}
+function navigate(delta) {
+  const visible = filteredItems();
+  const index = visible.findIndex(item => item.filename === state.current?.filename);
+  const next = visible[index + delta];
+  if (next) select(next.filename);
+}
+$('filter-manual').onclick = () => setFilter('manual');
+$('filter-all').onclick = () => setFilter('all');
+$('filter-saved').onclick = () => setFilter('saved');
+$('search').oninput = renderList;
+$('previous').onclick = () => navigate(-1);
+$('next').onclick = () => navigate(1);
+$('reset').onclick = () => {
+  if (!state.current) return;
+  state.points = state.current.automatic_corners.map(point => [...point]);
+  state.pick = -1; state.dirty = true; draw(); updatePreview();
+};
+$('reselect').onclick = () => {
+  if (!state.current) return;
+  state.pick = 0; message('请依次点击左上、右上、右下、左下四个角点。');
+};
+$('aspect').onchange = () => { state.dirty = true; updatePreview(); };
+$('refresh-preview').onclick = updatePreview;
+$('save').onclick = save;
+$('flag').onclick = flag;
+window.addEventListener('resize', draw);
+window.addEventListener('beforeunload', event => {
+  if (state.dirty) { event.preventDefault(); event.returnValue = ''; }
+});
+(async () => {
+  try {
+    state.items = await requestJSON('/api/items');
+    const requested = new URLSearchParams(location.search).get('image');
+    const selected = byName(requested) || state.items.find(item => item.status === 'manual_review') || state.items[0];
+    if (selected && selected.status !== 'manual_review') setFilter('all');
+    else renderList();
+    if (selected) await select(selected.filename);
+  } catch (error) { $('title').textContent = '无法加载'; message(error.message, true); }
+})();
+</script>
+</body>
+</html>

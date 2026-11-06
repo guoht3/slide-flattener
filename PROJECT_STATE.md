@@ -4,7 +4,8 @@
 
 - 已在本机部署 fork 与 Python 3.11 环境。
 - 新算法已处理首批 89 张 JPG，输出位于 `trial_output_cornerfix_all/`。
-- 逐张检查总览并核对有疑问的原图后，暂将 66 张放入 `deliverables_20261106/auto_checked/`，23 张放入 `deliverables_20261106/manual_review/`。
-- `deliverables_20261106/index.html` 提供原图与处理图逐张对照；`manifest.csv` 记录每张状态与路径；`contact_sheets/` 提供总览。
-- 手动处理清单保存在 `docs/manual-review.csv`。自动质量指标只标出 5 张，不能代替视觉复核。
-- 下一步：用户查看交付页面，确认质量标准并指出错分或仍需修正的图片；随后再处理人工组。
+- 用户在对照页指出 15 张角点问题，其中 12 张原先误列为自动组，3 张本来已属人工组。新版 `deliverables_20261106_v2/` 保留 89 张，分类为 54 张自动待验收、35 张需人工；原有 23 张人工图片一张未移除。
+- `deliverables_20261106_v2/index.html` 提供原图与处理图逐张对照，并可跳转到浏览器手动校正界面。旧版交付目录保留。
+- 浏览器手调服务入口为 `manual_editor.py`，页面为 `manual_editor.html`，本机地址 <http://127.0.0.1:8765/>。可以拖动或重选四角、预览、保存多个版本、把自动组图片加入人工组。每次保存新版本到 `manual_corrections/`，原图和旧版本不覆盖。
+- 原人工清单保存在 `docs/manual-review.csv`，用户新反馈保存在 `docs/user-corner-feedback.csv`。两份清单均不进入 Git；打包脚本通过 `--additional-review` 合并，不会丢弃原人工组。
+- 自动质量指标只标出 5 张，不能代替视觉复核。下一步由用户核对手动编辑结果与余下 54 张的质量，再继续修正；不能把“待验收”宣称为通过。
