@@ -49,7 +49,11 @@ def collect_sources(args):
         return [f for f in args.images if os.path.exists(f)]
 
     exts = (".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff")
-    return sorted(f for f in os.listdir(".") if f.lower().endswith(exts))
+    return sorted(
+        os.path.join(args.source_dir, f)
+        for f in os.listdir(args.source_dir)
+        if f.lower().endswith(exts)
+    )
 
 
 def draw_button(canvas, x0, y0, x1, y1, text, fill=(70, 70, 70)):
@@ -62,9 +66,10 @@ def draw_button(canvas, x0, y0, x1, y1, text, fill=(70, 70, 70)):
 
 
 class Annotator:
-    def __init__(self, sources, out_dir="flattened", aspect=DEFAULT_ASPECT):
+    def __init__(self, sources, out_dir="flattened", aspect=DEFAULT_ASPECT, autocolor=True):
         self.sources = sources
         self.out_dir = out_dir
+        self.autocolor = autocolor
         os.makedirs(self.out_dir, exist_ok=True)
 
         self.idx = 0
@@ -182,7 +187,8 @@ class Annotator:
         corners_small = self.corners * self.scale
         out_w, out_h = fs.output_size(corners_small, self.aspect)
         warped = fs.four_point_transform(self.small, corners_small, out_w, out_h)
-        warped = fs.auto_color(warped)
+        if self.autocolor:
+            warped = fs.auto_color(warped)
 
         h, w = warped.shape[:2]
         k = PREVIEW_MAX / max(w, h)
@@ -240,7 +246,8 @@ class Annotator:
     def save_current(self):
         out_w, out_h = fs.output_size(self.corners, self.aspect)
         warped = fs.four_point_transform(self.full, self.corners, out_w, out_h)
-        warped = fs.auto_color(warped)
+        if self.autocolor:
+            warped = fs.auto_color(warped)
 
         name = os.path.basename(self.sources[self.idx])
         base, ext = os.path.splitext(name)
@@ -277,9 +284,12 @@ class Annotator:
 def main():
     ap = argparse.ArgumentParser(description="Interactive slide-corner fixer.")
     ap.add_argument("images", nargs="*", help="source images to review (default: all images in cwd)")
+    ap.add_argument("--source-dir", default=".", help="folder of source images to review")
     ap.add_argument("--out", default="flattened", help="output dir for fixed results")
     ap.add_argument("--aspect", default=DEFAULT_ASPECT,
                     help="default output aspect ratio, e.g. 16:9, 4:3, 9:16, or 'auto'")
+    ap.add_argument("--no-autocolor", action="store_true",
+                    help="preserve the original slide colors")
     args = ap.parse_args()
 
     sources = collect_sources(args)
@@ -287,7 +297,7 @@ def main():
         print("No source images found.")
         sys.exit(1)
 
-    Annotator(sources, out_dir=args.out, aspect=args.aspect)
+    Annotator(sources, out_dir=args.out, aspect=args.aspect, autocolor=not args.no_autocolor)
 
 
 if __name__ == "__main__":

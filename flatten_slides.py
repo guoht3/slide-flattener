@@ -57,7 +57,7 @@ def four_point_transform(image, corners, target_w, target_h):
     return cv2.warpPerspective(image, M, (target_w, target_h))
 
 
-def _quad_from_contour(cnt, img_area, min_area_frac=0.05, ratio_hint=16.0 / 9.0):
+def _quad_from_contour(cnt, img_area, luminance, min_area_frac=0.05, ratio_hint=16.0 / 9.0):
     hull = cv2.convexHull(cnt)
     peri = cv2.arcLength(hull, True)
     quad = None
@@ -78,9 +78,106 @@ def _quad_from_contour(cnt, img_area, min_area_frac=0.05, ratio_hint=16.0 / 9.0)
     if h < 1:
         return None, 0.0
     ratio = w / h
-    # Prefer candidates close to the expected slide ratio.
-    score = area * math.exp(-((ratio - ratio_hint) / 0.35) ** 2)
+    # A large room contour can have the right shape and beat the actual screen.
+    # A projected slide should also be appreciably brighter than its surroundings.
+    interior = np.zeros(luminance.shape, dtype=np.uint8)
+    cv2.fillConvexPoly(interior, quad.astype(np.int32), 255)
+    exterior = cv2.bitwise_not(interior)
+    if cv2.countNonZero(exterior) < 0.01 * img_area:
+        return None, 0.0
+    contrast = cv2.mean(luminance, mask=interior)[0] - cv2.mean(luminance, mask=exterior)[0]
+    if contrast < 15:
+        return None, 0.0
+    bright_pixels = cv2.compare(luminance, 140, cv2.CMP_GT)
+    bright_share = cv2.countNonZero(cv2.bitwise_and(bright_pixels, interior)) / max(
+        cv2.countNonZero(interior), 1
+    )
+    shape_score = math.exp(-((ratio - ratio_hint) / 0.35) ** 2)
+    score = area * shape_score * (contrast / 255.0) ** 2 * bright_share ** 3
     return quad, score
+
+
+def _snap_color_edge(feature, quad, side):
+    """Fit a straight projected-image edge near one side of a candidate quad.
+
+    A screen frame can be almost as bright as the slide.  The blue-minus-red
+    change at the inner edge separates the projected image from that frame.
+    The line fit rejects lettering and other isolated high-contrast pixels.
+    """
+    start = quad[side]
+    end = quad[(side + 1) % 4]
+    direction = end - start
+    length = np.linalg.norm(direction)
+    if length < 30:
+        return None
+    # The ordered quad is clockwise, so this normal points outside it.
+    normal = np.array([direction[1], -direction[0]], dtype=np.float32) / length
+    positions = np.linspace(0.10, 0.90, 25, dtype=np.float32)
+    shifts = np.arange(-45, 46, dtype=np.float32)
+    base = start[None, :] + positions[:, None] * direction[None, :]
+
+    def sample(edge_offset):
+        coords = base[:, None, :] + (shifts[None, :, None] + edge_offset) * normal
+        return cv2.remap(
+            feature,
+            coords[:, :, 0].astype(np.float32),
+            coords[:, :, 1].astype(np.float32),
+            cv2.INTER_LINEAR,
+        )
+
+    # Positive means the projected side has more blue than the frame side.
+    strength = sample(-4) - sample(4)
+    strongest = np.argmax(strength, axis=1)
+    offsets = shifts[strongest]
+    peaks = strength[np.arange(len(positions)), strongest]
+    valid = peaks >= 18
+    if np.count_nonzero(valid) < 17:
+        return None
+
+    x = positions[valid]
+    y = offsets[valid]
+    # Theil-Sen fit tolerates a few samples landing on a letter or the outer
+    # frame instead of the projected-image boundary.
+    slopes = (y[None, :] - y[:, None]) / (x[None, :] - x[:, None] + np.eye(len(x)))
+    slopes = slopes[np.triu_indices(len(x), 1)]
+    slope = np.median(slopes)
+    intercept = np.median(y - slope * x)
+    inliers = np.abs(y - (slope * x + intercept)) <= 5
+    if np.count_nonzero(inliers) < 16:
+        return None
+    slope, intercept = np.polyfit(x[inliers], y[inliers], 1)
+    if max(abs(intercept), abs(slope + intercept)) > 45:
+        return None
+    return start + intercept * normal, end + (slope + intercept) * normal
+
+
+def _refine_lower_right(image, quad):
+    """Correct a lower-right corner pulled onto the surrounding screen frame."""
+    ordered = order_points(quad)
+    b = image[:, :, 0].astype(np.float32)
+    r = image[:, :, 2].astype(np.float32)
+    feature = cv2.GaussianBlur(b - r, (5, 5), 0)
+    right = _snap_color_edge(feature, ordered, 1)
+    bottom = _snap_color_edge(feature, ordered, 2)
+    if right is None or bottom is None:
+        return ordered
+
+    a, b = right
+    c, d = bottom
+    v = b - a
+    u = d - c
+    determinant = v[0] * u[1] - v[1] * u[0]
+    if abs(determinant) < 1e-5:
+        return ordered
+    delta = c - a
+    corner = a + ((delta[0] * u[1] - delta[1] * u[0]) / determinant) * v
+    move = corner - ordered[2]
+    toward_center = ordered.mean(axis=0) - ordered[2]
+    if np.dot(move, toward_center) <= 0 or np.linalg.norm(move) > 55:
+        return ordered
+    refined = ordered.copy()
+    refined[2] = corner
+    return refined
 
 
 def detect_slide_quad(image, ratio_hint=16.0 / 9.0):
@@ -134,6 +231,8 @@ def detect_slide_quad(image, ratio_hint=16.0 / 9.0):
     best = None
     best_score = 0.0
 
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+
     # Threshold the dominant contrast in its direction with raw thresholds.
     if dom is not None:
         signed = dom * dom_sign
@@ -144,29 +243,28 @@ def detect_slide_quad(image, ratio_hint=16.0 / 9.0):
                 closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
                 contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 for cnt in contours:
-                    quad, score = _quad_from_contour(cnt, img_area, ratio_hint=ratio_hint)
+                    quad, score = _quad_from_contour(cnt, img_area, gray, ratio_hint=ratio_hint)
                     if quad is not None and score > best_score:
                         best_score = score
                         best = quad
 
-    # Fallback: brightness, only if no color contrast found the screen.
-    if best is None:
-        gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
-        for t in (80, 100, 120, 140, 160):
-            mask = (gray > t).astype(np.uint8) * 255
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
-            closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
-            contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            for cnt in contours:
-                quad, score = _quad_from_contour(cnt, img_area, ratio_hint=ratio_hint)
-                if quad is not None and score > best_score:
-                    best_score = score
-                    best = quad
+    # Evaluate brightness candidates even when a color candidate exists. In a
+    # lecture hall the wall can have a stronger color signature than the screen.
+    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    for t in (80, 100, 120, 140, 160, 180):
+        mask = (blurred > t).astype(np.uint8) * 255
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (31, 31))
+        closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            quad, score = _quad_from_contour(cnt, img_area, gray, ratio_hint=ratio_hint)
+            if quad is not None and score > best_score:
+                best_score = score
+                best = quad
 
     if best is None:
         return None
-    return best / scale
+    return _refine_lower_right(small, best) / scale
 
 
 def parse_aspect(s):

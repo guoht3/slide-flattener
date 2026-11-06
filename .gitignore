@@ -1,0 +1,16 @@
+20_credentials/
+.env
+*.key
+*.pem
+id_rsa*
+node_modules/
+__pycache__/
+.venv/
+*.log
+01_temp/
+trial_output*/
+flattened/
+debug/
+review_sheets*/
+deliverables*/
+docs/manual-review.csv
